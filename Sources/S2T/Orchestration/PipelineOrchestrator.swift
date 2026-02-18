@@ -1,3 +1,5 @@
+import AppKit
+import AVFoundation
 import Foundation
 import os
 
@@ -20,6 +22,7 @@ final class PipelineOrchestrator {
     private var currentTask: Task<Void, Never>?
     private var feedbackTask: Task<Void, Never>?
     private var levelTask: Task<Void, Never>?
+    private var audioConfigTask: Task<Void, Never>?
 
     init(
         speechService: SpeechService,
@@ -35,6 +38,7 @@ final class PipelineOrchestrator {
         self.ttsService = ttsService
         self.clipboardService = clipboardService
         self.copyCorrected = copyCorrected
+        startAudioConfigObserver()
     }
 
     // MARK: - Recording Control
@@ -49,9 +53,6 @@ final class PipelineOrchestrator {
 
         // Stop TTS if playing
         ttsService.stopPlayback()
-
-        // Reset correction
-        lastCorrection = nil
 
         do {
             try speechService.startRecording()
@@ -93,6 +94,10 @@ final class PipelineOrchestrator {
     // MARK: - Pipeline
 
     private func processPipeline(audio: Data) async {
+        // Clear previous results now that processing begins
+        lastTranscription = nil
+        lastCorrection = nil
+
         // Step 1: Transcribe
         state = .processing(step: .transcribing)
 
@@ -149,21 +154,19 @@ final class PipelineOrchestrator {
             copyToClipboardWithFeedback(correctedText)
         }
 
-        // Step 3: TTS (only if correction succeeded)
+        state = .done(transcription, correction)
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.mainWindow?.orderFrontRegardless()
+        Logger.pipeline.info("Pipeline complete")
+
+        // TTS plays in the background — don't block .done state
         if let correction {
-            state = .processing(step: .speaking)
             do {
                 try await ttsService.speak(correction.correctedText)
             } catch {
-                // TTS failure is non-critical, continue silently
                 Logger.tts.error("TTS failed (non-critical): \(error.localizedDescription, privacy: .public)")
             }
         }
-
-        guard !Task.isCancelled else { return }
-
-        state = .done(transcription, correction)
-        Logger.pipeline.info("Pipeline complete")
     }
 
     // MARK: - Utilities
@@ -212,6 +215,31 @@ final class PipelineOrchestrator {
             }
         } else {
             Logger.pipeline.warning("Clipboard copy failed")
+        }
+    }
+
+    // MARK: - Audio Device Changes
+
+    private func startAudioConfigObserver() {
+        audioConfigTask = Task {
+            for await _ in NotificationCenter.default.notifications(
+                named: .AVAudioEngineConfigurationChange
+            ) {
+                guard !Task.isCancelled else { break }
+                handleAudioConfigChange()
+            }
+        }
+    }
+
+    private func handleAudioConfigChange() {
+        Logger.audio.warning("Audio device configuration changed")
+        let wasRecording: Bool
+        if case .recording = state { wasRecording = true } else { wasRecording = false }
+        speechService.reset()
+        if wasRecording {
+            state = .error(.configurationError(
+                "Audio device changed during recording. Please try again."
+            ))
         }
     }
 }

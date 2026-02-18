@@ -147,6 +147,18 @@ final class SpeechService: @unchecked Sendable {
 
     var isRecording: Bool { isCurrentlyRecording }
 
+    /// Reset engine after audio device configuration change.
+    func reset() {
+        if isCurrentlyRecording {
+            engine.inputNode.removeTap(onBus: 0)
+            isCurrentlyRecording = false
+        }
+        engine.stop()
+        engine.reset()
+        levelLock.withLock { $0 = 0 }
+        bufferLock.withLock { $0 = [] }
+    }
+
     // MARK: - Resample
 
     /// Simple linear-interpolation resample.
