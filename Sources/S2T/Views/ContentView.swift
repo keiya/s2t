@@ -40,6 +40,7 @@ struct ContentView: View {
                             transcription: orchestrator.lastTranscription,
                             correction: orchestrator.lastCorrection,
                             onCopyRawTranscript: { orchestrator.copyRawTranscript() },
+                            onCopyCorrectedText: { orchestrator.copyCorrectedText() },
                             onReplayTTS: { orchestrator.replayTTS() }
                         )
                     }

@@ -92,7 +92,8 @@ struct S2TApp: App {
             transcriptionService: transcriptionService,
             correctionService: correctionService,
             ttsService: ttsService,
-            clipboardService: clipboardService
+            clipboardService: clipboardService,
+            copyCorrected: config.clipboard?.copyCorrected ?? false
         )
         self.orchestrator = orch
 
@@ -165,6 +166,9 @@ struct S2TApp: App {
 
                 [input]
                 hotkey = ["left_ctrl", "space"]
+
+                [clipboard]
+                copy_corrected = false
                 """
                 try sampleConfig.write(to: configPath, atomically: true, encoding: .utf8)
                 Logger.config.info("Created sample config at \(configPath.path)")

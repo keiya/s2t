@@ -15,6 +15,7 @@ final class PipelineOrchestrator {
     private let correctionService: any CorrectionService
     private let ttsService: TTSService
     private let clipboardService: ClipboardService
+    private let copyCorrected: Bool
 
     private var currentTask: Task<Void, Never>?
     private var feedbackTask: Task<Void, Never>?
@@ -25,13 +26,15 @@ final class PipelineOrchestrator {
         transcriptionService: any TranscriptionService,
         correctionService: any CorrectionService,
         ttsService: TTSService,
-        clipboardService: ClipboardService
+        clipboardService: ClipboardService,
+        copyCorrected: Bool = false
     ) {
         self.speechService = speechService
         self.transcriptionService = transcriptionService
         self.correctionService = correctionService
         self.ttsService = ttsService
         self.clipboardService = clipboardService
+        self.copyCorrected = copyCorrected
     }
 
     // MARK: - Recording Control
@@ -117,6 +120,9 @@ final class PipelineOrchestrator {
         lastTranscription = transcription
         Logger.pipeline.info("Transcription: \(transcription.text.prefix(80))")
 
+        // Copy raw transcript to clipboard immediately
+        copyToClipboardWithFeedback(transcription.text)
+
         // Step 2: Correct
         state = .processing(step: .correcting)
 
@@ -129,8 +135,8 @@ final class PipelineOrchestrator {
             return
         } catch {
             guard !Task.isCancelled else { return }
-            // Correction failed — fallback to raw transcript
-            Logger.pipeline.warning("Correction failed, falling back to raw transcript: \(error.localizedDescription)")
+            // Correction failed — raw transcript already on clipboard
+            Logger.pipeline.warning("Correction failed: \(error.localizedDescription)")
             correction = nil
         }
 
@@ -138,27 +144,16 @@ final class PipelineOrchestrator {
 
         lastCorrection = correction
 
-        // Step 3: Clipboard copy
-        let textToCopy = correction?.correctedText ?? transcription.text
-        let copied = clipboardService.copyToClipboard(textToCopy)
-        if copied {
-            showCopiedFeedback = true
-            feedbackTask?.cancel()
-            feedbackTask = Task {
-                try? await Task.sleep(for: .seconds(2))
-                if !Task.isCancelled {
-                    showCopiedFeedback = false
-                }
-            }
-        } else {
-            Logger.pipeline.warning("Clipboard copy failed")
+        // Copy corrected text if enabled
+        if copyCorrected, let correctedText = correction?.correctedText {
+            copyToClipboardWithFeedback(correctedText)
         }
 
-        // Step 4: TTS (only if correction succeeded)
-        if correction != nil {
+        // Step 3: TTS (only if correction succeeded)
+        if let correction {
             state = .processing(step: .speaking)
             do {
-                try await ttsService.speak(textToCopy)
+                try await ttsService.speak(correction.correctedText)
             } catch {
                 // TTS failure is non-critical, continue silently
                 Logger.tts.error("TTS failed (non-critical): \(error.localizedDescription, privacy: .public)")
@@ -196,7 +191,16 @@ final class PipelineOrchestrator {
 
     func copyRawTranscript() {
         guard let transcription = lastTranscription else { return }
-        let copied = clipboardService.copyToClipboard(transcription.text)
+        copyToClipboardWithFeedback(transcription.text)
+    }
+
+    func copyCorrectedText() {
+        guard let correction = lastCorrection else { return }
+        copyToClipboardWithFeedback(correction.correctedText)
+    }
+
+    private func copyToClipboardWithFeedback(_ text: String) {
+        let copied = clipboardService.copyToClipboard(text)
         if copied {
             showCopiedFeedback = true
             feedbackTask?.cancel()
@@ -206,6 +210,8 @@ final class PipelineOrchestrator {
                     showCopiedFeedback = false
                 }
             }
+        } else {
+            Logger.pipeline.warning("Clipboard copy failed")
         }
     }
 }

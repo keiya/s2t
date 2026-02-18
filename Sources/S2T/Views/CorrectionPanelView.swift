@@ -4,6 +4,7 @@ struct CorrectionPanelView: View {
     let transcription: TranscriptionResult?
     let correction: CorrectionResult?
     let onCopyRawTranscript: () -> Void
+    let onCopyCorrectedText: () -> Void
     let onReplayTTS: () -> Void
 
     var body: some View {
@@ -47,14 +48,21 @@ struct CorrectionPanelView: View {
                 }
             }
 
-            // Replay button
+            // Action buttons
             if correction != nil {
                 Divider()
 
-                Button(action: onReplayTTS) {
-                    Label("Replay", systemImage: "speaker.wave.2")
+                HStack(spacing: 12) {
+                    Button(action: onCopyCorrectedText) {
+                        Label("Copy Corrected", systemImage: "doc.on.doc")
+                    }
+                    .buttonStyle(.borderless)
+
+                    Button(action: onReplayTTS) {
+                        Label("Replay", systemImage: "speaker.wave.2")
+                    }
+                    .buttonStyle(.borderless)
                 }
-                .buttonStyle(.borderless)
             }
         }
     }

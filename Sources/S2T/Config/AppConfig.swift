@@ -8,6 +8,7 @@ struct AppConfig: Sendable, Codable {
     var correction: CorrectionConfig
     var tts: TtsConfig
     var input: InputConfig
+    var clipboard: ClipboardConfig?
 
     struct ApiConfig: Sendable, Codable {
         var openaiKey: String
@@ -41,6 +42,14 @@ struct AppConfig: Sendable, Codable {
         var hotkey: [String]
     }
 
+    struct ClipboardConfig: Sendable, Codable {
+        var copyCorrected: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case copyCorrected = "copy_corrected"
+        }
+    }
+
     // MARK: - Defaults
 
     static let `default` = AppConfig(
@@ -48,7 +57,8 @@ struct AppConfig: Sendable, Codable {
         stt: SttConfig(model: "gpt-4o-mini-transcribe", timeout: 30),
         correction: CorrectionConfig(model: "gpt-5-mini", timeout: 30),
         tts: TtsConfig(model: "gpt-4o-mini-tts", voice: "coral", enabled: true),
-        input: InputConfig(hotkey: ["left_ctrl", "space"])
+        input: InputConfig(hotkey: ["left_ctrl", "space"]),
+        clipboard: ClipboardConfig(copyCorrected: false)
     )
 
     // MARK: - Loading
