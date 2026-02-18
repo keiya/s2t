@@ -116,25 +116,25 @@ final class SpeechService: @unchecked Sendable {
             return copy
         }
 
-        // Resample from hardware rate to target rate
+        Logger.audio.info(
+            "Recording stopped: \(monoFloat.count, privacy: .public) samples at \(self.hardwareSampleRate, privacy: .public)Hz"
+        )
+
+        // Try M4A (AAC) at hardware sample rate — no resampling needed, AAC compresses well
+        do {
+            let m4aData = try Self.createM4AData(from: monoFloat, sampleRate: hardwareSampleRate)
+            Logger.audio.info("Encoded as M4A: \(m4aData.count, privacy: .public) bytes")
+            return RecordedAudio(data: m4aData, filename: "audio.m4a", contentType: "audio/mp4")
+        } catch {
+            Logger.audio.warning("M4A encoding failed: \(error.localizedDescription, privacy: .public)")
+        }
+
+        // Fallback: resample to 16kHz and encode as WAV
         let resampled = Self.resample(
             monoFloat,
             fromRate: hardwareSampleRate,
             toRate: Self.targetSampleRate
         )
-
-        Logger.audio.info(
-            "Recording stopped: \(resampled.count, privacy: .public) samples at \(Self.targetSampleRate, privacy: .public)Hz"
-        )
-
-        // Try M4A (AAC) first — ~4x smaller than WAV, faster upload
-        if let m4aData = try? Self.createM4AData(from: resampled, sampleRate: Self.targetSampleRate) {
-            Logger.audio.info("Encoded as M4A: \(m4aData.count, privacy: .public) bytes")
-            return RecordedAudio(data: m4aData, filename: "audio.m4a", contentType: "audio/mp4")
-        }
-
-        // Fallback: WAV (uncompressed)
-        Logger.audio.warning("M4A encoding failed, falling back to WAV")
         let pcmData = Self.floatToInt16PCM(resampled)
         let wavData = Self.createWAVData(from: pcmData)
         Logger.audio.info("Encoded as WAV: \(wavData.count, privacy: .public) bytes")
