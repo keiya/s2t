@@ -212,11 +212,19 @@ final class SpeechService: @unchecked Sendable {
             AVFormatIDKey: kAudioFormatMPEG4AAC,
             AVSampleRateKey: sampleRate,
             AVNumberOfChannelsKey: 1,
-            AVEncoderBitRateKey: 64000,
+            AVEncoderBitRateKey: 96000,
         ]
 
-        let outputFile = try AVAudioFile(forWriting: tempURL, settings: settings)
-        try outputFile.write(from: buffer)
+        // Write in its own scope so AVAudioFile is closed/finalized before reading
+        do {
+            let outputFile = try AVAudioFile(
+                forWriting: tempURL,
+                settings: settings,
+                commonFormat: .pcmFormatFloat32,
+                interleaved: false
+            )
+            try outputFile.write(from: buffer)
+        }
 
         return try Data(contentsOf: tempURL)
     }
