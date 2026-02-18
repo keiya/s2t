@@ -17,7 +17,11 @@ final class PipelineOrchestrator {
     private let correctionService: any CorrectionService
     private let ttsService: TTSService
     private let clipboardService: ClipboardService
+    private let windowTitleService: WindowTitleService
     private let copyCorrected: Bool
+
+    private var transcriptHistory = TranscriptHistory()
+    private var currentWindowTitle: String?
 
     private var currentTask: Task<Void, Never>?
     private var feedbackTask: Task<Void, Never>?
@@ -25,17 +29,14 @@ final class PipelineOrchestrator {
     private var audioConfigTask: Task<Void, Never>?
     private var configChangeRestartCount = 0
 
-    /// Tracks whether the hotkey is currently held down.
-    /// Prevents key repeat from re-triggering startRecording after a config change error.
-    private var isHotkeyHeld = false
-
     init(
         speechService: SpeechService,
         transcriptionService: any TranscriptionService,
         correctionService: any CorrectionService,
         ttsService: TTSService,
         clipboardService: ClipboardService,
-        copyCorrected: Bool = false
+        copyCorrected: Bool = false,
+        windowTitleService: WindowTitleService = WindowTitleService()
     ) {
         self.speechService = speechService
         self.transcriptionService = transcriptionService
@@ -43,19 +44,18 @@ final class PipelineOrchestrator {
         self.ttsService = ttsService
         self.clipboardService = clipboardService
         self.copyCorrected = copyCorrected
+        self.windowTitleService = windowTitleService
         startAudioConfigObserver()
     }
 
     // MARK: - Recording Control
 
     func startRecording() {
-        // Ignore key repeat — only the first keyDown should start recording.
-        // Without this, config change errors cause state != .recording, and
-        // subsequent key repeats re-trigger startRecording in a loop.
-        guard !isHotkeyHeld else { return }
-        isHotkeyHeld = true
-
         if case .recording = state { return }
+
+        // Capture window title before any state changes (while the user's target window is still frontmost)
+        currentWindowTitle = windowTitleService.frontmostWindowTitle()
+        Logger.pipeline.info("Window title: \(self.currentWindowTitle ?? "none", privacy: .public)")
 
         // Check microphone permission before attempting to record
         let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
@@ -97,8 +97,6 @@ final class PipelineOrchestrator {
     }
 
     func stopRecordingAndProcess() {
-        isHotkeyHeld = false
-
         guard case .recording = state else {
             Logger.pipeline.warning("stopRecordingAndProcess called but not recording")
             return
@@ -123,9 +121,12 @@ final class PipelineOrchestrator {
         // Step 1: Transcribe
         state = .processing(step: .transcribing)
 
+        let prompt = transcriptHistory.buildPrompt(windowTitle: currentWindowTitle)
+        Logger.pipeline.info("STT prompt: \(prompt ?? "none", privacy: .public)")
+
         let transcription: TranscriptionResult
         do {
-            transcription = try await transcriptionService.transcribe(audio)
+            transcription = try await transcriptionService.transcribe(audio, prompt: prompt)
         } catch is CancellationError {
             return
         } catch let urlError as URLError where urlError.code == .cancelled {
@@ -171,18 +172,20 @@ final class PipelineOrchestrator {
 
         lastCorrection = correction
 
+        // Update transcript history for future STT prompting (prefer corrected text)
+        let historyText = correction?.correctedText ?? transcription.text
+        transcriptHistory.append(historyText, forTitle: currentWindowTitle)
+
         // Copy corrected text if enabled
         if copyCorrected, let correctedText = correction?.correctedText {
             copyToClipboardWithFeedback(correctedText)
         }
 
         state = .done(transcription, correction)
-        NSApp.activate(ignoringOtherApps: true)
-        NSApp.mainWindow?.orderFrontRegardless()
         Logger.pipeline.info("Pipeline complete")
 
-        // TTS plays in the background — don't block .done state
-        if let correction {
+        // TTS plays only when there are corrections — skip if text was already correct
+        if let correction, !correction.issues.isEmpty {
             do {
                 try await ttsService.speak(correction.correctedText)
             } catch {

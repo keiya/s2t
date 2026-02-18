@@ -91,8 +91,12 @@ final class HotkeyService: Sendable {
         switch type {
         case .keyDown:
             if currentKeyCode == keyCode && currentFlags.contains(modifierFlags) {
-                Task { @MainActor in
-                    self.onHotkeyDown()
+                // Suppress auto-repeat keyDown events — only the initial press should start recording
+                let isAutoRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+                if !isAutoRepeat {
+                    Task { @MainActor in
+                        self.onHotkeyDown()
+                    }
                 }
                 return true
             }

@@ -5,7 +5,7 @@ struct MockTranscriptionService: TranscriptionService {
     var result: TranscriptionResult?
     var error: (any Error)?
 
-    func transcribe(_ audio: RecordedAudio) async throws -> TranscriptionResult {
+    func transcribe(_ audio: RecordedAudio, prompt: String? = nil) async throws -> TranscriptionResult {
         if let error { throw error }
         return result ?? TranscriptionResult(text: "mock transcription", detectedLanguage: "en")
     }
