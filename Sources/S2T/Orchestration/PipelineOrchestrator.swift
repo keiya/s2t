@@ -25,6 +25,10 @@ final class PipelineOrchestrator {
     private var audioConfigTask: Task<Void, Never>?
     private var configChangeRestartCount = 0
 
+    /// Tracks whether the hotkey is currently held down.
+    /// Prevents key repeat from re-triggering startRecording after a config change error.
+    private var isHotkeyHeld = false
+
     init(
         speechService: SpeechService,
         transcriptionService: any TranscriptionService,
@@ -45,9 +49,13 @@ final class PipelineOrchestrator {
     // MARK: - Recording Control
 
     func startRecording() {
-        // Ignore key repeat while already recording or in error state
+        // Ignore key repeat — only the first keyDown should start recording.
+        // Without this, config change errors cause state != .recording, and
+        // subsequent key repeats re-trigger startRecording in a loop.
+        guard !isHotkeyHeld else { return }
+        isHotkeyHeld = true
+
         if case .recording = state { return }
-        if case .error = state { return }
 
         // Check microphone permission before attempting to record
         let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
@@ -89,6 +97,8 @@ final class PipelineOrchestrator {
     }
 
     func stopRecordingAndProcess() {
+        isHotkeyHeld = false
+
         guard case .recording = state else {
             Logger.pipeline.warning("stopRecordingAndProcess called but not recording")
             return
