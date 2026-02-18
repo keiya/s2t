@@ -7,12 +7,12 @@ macOS native app that helps you practice English speaking. Record your voice, ge
 1. **Hold the hotkey** to record yourself speaking English
 2. **Release** to trigger the pipeline:
    - Your speech is transcribed (OpenAI Whisper)
+   - The raw transcript is immediately copied to your clipboard
    - The transcript is checked for grammar, vocabulary, and naturalness (OpenAI LLM)
    - Corrections are displayed with explanations and severity levels
    - The corrected text is read aloud (OpenAI TTS)
-   - The corrected text is copied to your clipboard
 
-If correction fails, the raw transcript is copied instead. TTS failure is non-critical and won't block the pipeline.
+The raw transcript is copied right after STT so you can paste it immediately. The corrected text is NOT auto-copied by default — review the corrections, learn from them, and try again. You can manually copy the corrected text via the UI button, or enable auto-copy with `copy_corrected = true` (see Configuration).
 
 ## Requirements
 
@@ -58,6 +58,9 @@ enabled = true                     # Set false to disable TTS
 
 [input]
 hotkey = ["left_ctrl", "space"]    # Global hotkey combination
+
+[clipboard]
+copy_corrected = false             # Set true to auto-copy corrected text after correction
 ```
 
 You can use `${ENV_VAR}` syntax to reference environment variables. Changes require an app restart.
@@ -102,7 +105,7 @@ The window shows:
   - Reason for correction
   - Severity badge (LOW / MEDIUM / HIGH)
   - Optional learner note
-- **Buttons** — Copy raw transcript, Replay TTS
+- **Buttons** — Copy raw transcript, Copy corrected text, Replay TTS
 
 ## Cost
 
