@@ -23,7 +23,10 @@ final class PipelineOrchestrator {
     private var feedbackTask: Task<Void, Never>?
     private var levelTask: Task<Void, Never>?
     private var audioConfigTask: Task<Void, Never>?
-    private var recordingStartedAt: ContinuousClock.Instant?
+
+    /// Tracks whether the hotkey is currently held down.
+    /// Prevents key repeat from re-triggering startRecording after a config change error.
+    private var isHotkeyHeld = false
 
     init(
         speechService: SpeechService,
@@ -45,9 +48,13 @@ final class PipelineOrchestrator {
     // MARK: - Recording Control
 
     func startRecording() {
-        // Ignore key repeat while already recording or in error state
+        // Ignore key repeat — only the first keyDown should start recording.
+        // Without this, config change errors cause state != .recording, and
+        // subsequent key repeats re-trigger startRecording in a loop.
+        guard !isHotkeyHeld else { return }
+        isHotkeyHeld = true
+
         if case .recording = state { return }
-        if case .error = state { return }
 
         // Check microphone permission before attempting to record
         let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
@@ -68,7 +75,6 @@ final class PipelineOrchestrator {
         do {
             try speechService.startRecording()
             state = .recording
-            recordingStartedAt = .now
             startLevelMonitor()
             Logger.pipeline.info("Recording started")
         } catch {
@@ -89,6 +95,8 @@ final class PipelineOrchestrator {
     }
 
     func stopRecordingAndProcess() {
+        isHotkeyHeld = false
+
         guard case .recording = state else {
             Logger.pipeline.warning("stopRecordingAndProcess called but not recording")
             return
@@ -244,23 +252,23 @@ final class PipelineOrchestrator {
     }
 
     private func handleAudioConfigChange() {
-        Logger.audio.warning("Audio device configuration changed")
+        Logger.audio.error("Audio device configuration changed, engine.isRunning=\(self.speechService.isEngineRunning, privacy: .public)")
 
         guard case .recording = state else {
-            // Not recording — just reset engine for next use
-            speechService.reset()
+            // Not recording — engine will be set up fresh on next recording.
             return
         }
 
-        // Ignore config changes within 1 second of recording start.
-        // Starting the engine can trigger a spurious config change on some systems.
-        if let startedAt = recordingStartedAt,
-           ContinuousClock.now - startedAt < .seconds(1)
-        {
-            Logger.audio.info("Ignoring config change during engine initialization")
+        if speechService.isEngineRunning {
+            // Engine is still running — this is a spurious notification from engine's
+            // own hardware initialization. No action needed, recording continues.
+            Logger.audio.error("Engine still running, ignoring config change")
             return
         }
 
+        // Engine actually stopped (real device change like headphones plugged in).
+        // Can't reliably restart mid-recording, so report error.
+        Logger.audio.error("Engine stopped by config change, aborting recording")
         speechService.reset()
         state = .error(.configurationError(
             "Audio device changed during recording. Please try again."

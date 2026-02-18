@@ -7,10 +7,13 @@ import os
 /// Not @MainActor, not actor — AVAudioEngine callbacks run on a realtime audio thread.
 /// Uses OSAllocatedUnfairLock for thread-safe buffer access.
 final class SpeechService: @unchecked Sendable {
-    private let engine = AVAudioEngine()
+    private var engine = AVAudioEngine()
     private let bufferLock = OSAllocatedUnfairLock(initialState: [Float]())
     private var isCurrentlyRecording = false
     private var hardwareSampleRate: Double = 48000
+
+    /// Monotonic timestamp of the last engine.start(), used by config change handler.
+    private(set) var engineStartedAt: ContinuousClock.Instant = .now
 
     /// Current audio level (0.0–1.0), updated from the audio tap.
     let levelLock = OSAllocatedUnfairLock(initialState: Float(0))
@@ -44,7 +47,6 @@ final class SpeechService: @unchecked Sendable {
         }
 
         hardwareSampleRate = hwFormat.sampleRate
-        let channelCount = Int(hwFormat.channelCount)
 
         Logger.audio.error(
             "Hardware format: \(hwFormat.sampleRate, privacy: .public)Hz, \(hwFormat.channelCount, privacy: .public)ch"
@@ -52,11 +54,15 @@ final class SpeechService: @unchecked Sendable {
 
         // Tap in hardware format (nil) — guaranteed to work with any device.
         // We handle downmix + resample ourselves.
+        // Read channelCount from the buffer's format (not captured from outer scope)
+        // so it stays correct even if hardware changes mid-recording.
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: nil) {
             [bufferLock, levelLock] buffer, _ in
 
             let frameCount = Int(buffer.frameLength)
             guard frameCount > 0 else { return }
+
+            let channelCount = Int(buffer.format.channelCount)
 
             // Downmix to mono: average all channels
             var mono = [Float](repeating: 0, count: frameCount)
@@ -95,6 +101,7 @@ final class SpeechService: @unchecked Sendable {
         }
 
         try engine.start()
+        engineStartedAt = .now
         isCurrentlyRecording = true
         Logger.audio.error("Recording started")
     }
@@ -143,16 +150,25 @@ final class SpeechService: @unchecked Sendable {
 
     var isRecording: Bool { isCurrentlyRecording }
 
-    /// Reset engine after audio device configuration change.
+    /// Handle audio config change during recording.
+    /// Returns true if the engine is still running (no action needed),
+    /// false if it actually stopped and needs a full re-record.
+    var isEngineRunning: Bool {
+        engine.isRunning
+    }
+
+    /// Full reset: create a fresh AVAudioEngine instance.
+    /// This is the nuclear option when the engine is in an unrecoverable state (e.g. -10868).
     func reset() {
         if isCurrentlyRecording {
             engine.inputNode.removeTap(onBus: 0)
             isCurrentlyRecording = false
         }
         engine.stop()
-        engine.reset()
+        engine = AVAudioEngine()
         levelLock.withLock { $0 = 0 }
         bufferLock.withLock { $0 = [] }
+        Logger.audio.error("Engine fully reset (new instance)")
     }
 
     // MARK: - Resample
