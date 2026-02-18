@@ -1,0 +1,15 @@
+{
+  "originHash" : "ce589649922119568ad877980d47c6b64a241fc4ee8af77e768ce90e17b9f278",
+  "pins" : [
+    {
+      "identity" : "tomldecoder",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/dduan/TOMLDecoder.git",
+      "state" : {
+        "revision" : "f4388e05c035d6430e94022c353123abc020f1c4",
+        "version" : "0.4.3"
+      }
+    }
+  ],
+  "version" : 3
+}
