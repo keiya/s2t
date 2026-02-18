@@ -2,7 +2,7 @@ import Foundation
 import os
 
 protocol TranscriptionService: Sendable {
-    func transcribe(_ audio: Data) async throws -> TranscriptionResult
+    func transcribe(_ audio: RecordedAudio) async throws -> TranscriptionResult
 }
 
 struct OpenAITranscriptionService: TranscriptionService {
@@ -12,19 +12,19 @@ struct OpenAITranscriptionService: TranscriptionService {
 
     private static let endpoint = URL(string: "https://api.openai.com/v1/audio/transcriptions")!
 
-    func transcribe(_ audio: Data) async throws -> TranscriptionResult {
-        guard audio.count > SpeechService.minimumAudioDataSize else {
+    func transcribe(_ audio: RecordedAudio) async throws -> TranscriptionResult {
+        guard audio.data.count > SpeechService.minimumAudioDataSize else {
             throw PipelineError.audioTooShort
         }
 
         let boundary = UUID().uuidString
         var body = Data()
 
-        // file field (WAV)
+        // file field
         body.append("--\(boundary)\r\n")
-        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\n")
-        body.append("Content-Type: audio/wav\r\n\r\n")
-        body.append(audio)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(audio.filename)\"\r\n")
+        body.append("Content-Type: \(audio.contentType)\r\n\r\n")
+        body.append(audio.data)
         body.append("\r\n")
 
         // model field
@@ -53,7 +53,7 @@ struct OpenAITranscriptionService: TranscriptionService {
         )
         request.timeoutInterval = timeout
 
-        Logger.stt.info("Sending transcription request (\(audio.count) bytes)")
+        Logger.stt.info("Sending transcription request (\(audio.data.count) bytes, \(audio.filename))")
 
         let (data, response) = try await URLSession.shared.upload(for: request, from: body)
 

@@ -82,18 +82,18 @@ final class PipelineOrchestrator {
             return
         }
 
-        let audioData = speechService.stopRecording()
-        Logger.pipeline.info("Recording stopped, \(audioData.count) bytes captured")
+        let audio = speechService.stopRecording()
+        Logger.pipeline.info("Recording stopped, \(audio.data.count) bytes captured (\(audio.filename))")
 
         currentTask?.cancel()
         currentTask = Task {
-            await processPipeline(audio: audioData)
+            await processPipeline(audio: audio)
         }
     }
 
     // MARK: - Pipeline
 
-    private func processPipeline(audio: Data) async {
+    private func processPipeline(audio: RecordedAudio) async {
         // Clear previous results now that processing begins
         lastTranscription = nil
         lastCorrection = nil

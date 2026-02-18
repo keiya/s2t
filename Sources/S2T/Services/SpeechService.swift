@@ -99,10 +99,10 @@ final class SpeechService: @unchecked Sendable {
         Logger.audio.error("Recording started")
     }
 
-    func stopRecording() -> Data {
+    func stopRecording() -> RecordedAudio {
         guard isCurrentlyRecording else {
             Logger.audio.warning("Not recording, returning empty data")
-            return Data()
+            return RecordedAudio(data: Data(), filename: "audio.wav", contentType: "audio/wav")
         }
 
         engine.inputNode.removeTap(onBus: 0)
@@ -123,26 +123,22 @@ final class SpeechService: @unchecked Sendable {
             toRate: Self.targetSampleRate
         )
 
-        // Convert float to Int16 PCM
-        var pcmData = Data(capacity: resampled.count * MemoryLayout<Int16>.size)
-        var peak: Int16 = 0
-        for sample in resampled {
-            let clamped = max(-1.0, min(1.0, sample))
-            let int16 = Int16(clamped * Float(Int16.max))
-            if abs(int16) > peak { peak = abs(int16) }
-            Swift.withUnsafeBytes(of: int16.littleEndian) { pcmData.append(contentsOf: $0) }
-        }
-
-        let wavData = Self.createWAVData(from: pcmData)
-
-        Logger.audio.error(
-            "Recording stopped: \(pcmData.count, privacy: .public) bytes PCM, \(wavData.count, privacy: .public) bytes WAV, peak=\(peak, privacy: .public)"
+        Logger.audio.info(
+            "Recording stopped: \(resampled.count, privacy: .public) samples at \(Self.targetSampleRate, privacy: .public)Hz"
         )
 
-        // Debug: save WAV to /tmp for playback verification
-        try? wavData.write(to: URL(fileURLWithPath: "/tmp/s2t_debug.wav"))
+        // Try M4A (AAC) first — ~4x smaller than WAV, faster upload
+        if let m4aData = try? Self.createM4AData(from: resampled, sampleRate: Self.targetSampleRate) {
+            Logger.audio.info("Encoded as M4A: \(m4aData.count, privacy: .public) bytes")
+            return RecordedAudio(data: m4aData, filename: "audio.m4a", contentType: "audio/mp4")
+        }
 
-        return wavData
+        // Fallback: WAV (uncompressed)
+        Logger.audio.warning("M4A encoding failed, falling back to WAV")
+        let pcmData = Self.floatToInt16PCM(resampled)
+        let wavData = Self.createWAVData(from: pcmData)
+        Logger.audio.info("Encoded as WAV: \(wavData.count, privacy: .public) bytes")
+        return RecordedAudio(data: wavData, filename: "audio.wav", contentType: "audio/wav")
     }
 
     var isRecording: Bool { isCurrentlyRecording }
@@ -179,6 +175,63 @@ final class SpeechService: @unchecked Sendable {
             output[i] = input[idx0] * (1.0 - frac) + input[idx1] * frac
         }
         return output
+    }
+
+    // MARK: - M4A (AAC) Encoding
+
+    /// Encode float samples to AAC in M4A container via AVAudioFile.
+    static func createM4AData(from samples: [Float], sampleRate: Double) throws -> Data {
+        guard !samples.isEmpty else { throw PipelineError.audioTooShort }
+
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("s2t_\(UUID().uuidString).m4a")
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+
+        guard let pcmFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: sampleRate,
+            channels: 1,
+            interleaved: false
+        ) else {
+            throw PipelineError.configurationError("Cannot create PCM audio format")
+        }
+
+        guard let buffer = AVAudioPCMBuffer(
+            pcmFormat: pcmFormat,
+            frameCapacity: AVAudioFrameCount(samples.count)
+        ) else {
+            throw PipelineError.configurationError("Cannot create audio buffer")
+        }
+
+        buffer.frameLength = AVAudioFrameCount(samples.count)
+        samples.withUnsafeBufferPointer { ptr in
+            buffer.floatChannelData![0].update(from: ptr.baseAddress!, count: samples.count)
+        }
+
+        let settings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatMPEG4AAC,
+            AVSampleRateKey: sampleRate,
+            AVNumberOfChannelsKey: 1,
+            AVEncoderBitRateKey: 64000,
+        ]
+
+        let outputFile = try AVAudioFile(forWriting: tempURL, settings: settings)
+        try outputFile.write(from: buffer)
+
+        return try Data(contentsOf: tempURL)
+    }
+
+    // MARK: - PCM Conversion
+
+    /// Convert float samples to 16-bit little-endian PCM data.
+    static func floatToInt16PCM(_ samples: [Float]) -> Data {
+        var pcmData = Data(capacity: samples.count * MemoryLayout<Int16>.size)
+        for sample in samples {
+            let clamped = max(-1.0, min(1.0, sample))
+            let int16 = Int16(clamped * Float(Int16.max))
+            Swift.withUnsafeBytes(of: int16.littleEndian) { pcmData.append(contentsOf: $0) }
+        }
+        return pcmData
     }
 
     // MARK: - WAV Encoding

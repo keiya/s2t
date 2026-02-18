@@ -153,7 +153,7 @@ struct S2TApp: App {
 
                 [stt]
                 model = "gpt-4o-mini-transcribe"
-                timeout = 30
+                timeout = 60
 
                 [correction]
                 model = "gpt-5-mini"

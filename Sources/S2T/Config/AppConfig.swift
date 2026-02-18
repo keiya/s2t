@@ -54,7 +54,7 @@ struct AppConfig: Sendable, Codable {
 
     static let `default` = AppConfig(
         api: ApiConfig(openaiKey: ""),
-        stt: SttConfig(model: "gpt-4o-mini-transcribe", timeout: 30),
+        stt: SttConfig(model: "gpt-4o-mini-transcribe", timeout: 60),
         correction: CorrectionConfig(model: "gpt-5-mini", timeout: 30),
         tts: TtsConfig(model: "gpt-4o-mini-tts", voice: "coral", enabled: true),
         input: InputConfig(hotkey: ["left_ctrl", "space"]),
