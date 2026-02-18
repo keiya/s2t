@@ -23,6 +23,7 @@ final class PipelineOrchestrator {
     private var feedbackTask: Task<Void, Never>?
     private var levelTask: Task<Void, Never>?
     private var audioConfigTask: Task<Void, Never>?
+    private var recordingStartedAt: ContinuousClock.Instant?
 
     init(
         speechService: SpeechService,
@@ -44,8 +45,18 @@ final class PipelineOrchestrator {
     // MARK: - Recording Control
 
     func startRecording() {
-        // Ignore key repeat while already recording
+        // Ignore key repeat while already recording or in error state
         if case .recording = state { return }
+        if case .error = state { return }
+
+        // Check microphone permission before attempting to record
+        let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+        if micStatus == .denied || micStatus == .restricted {
+            state = .error(.configurationError(
+                "Microphone access denied. Grant permission in System Settings > Privacy & Security > Microphone."
+            ))
+            return
+        }
 
         // Cancel any in-flight pipeline
         currentTask?.cancel()
@@ -57,11 +68,12 @@ final class PipelineOrchestrator {
         do {
             try speechService.startRecording()
             state = .recording
+            recordingStartedAt = .now
             startLevelMonitor()
             Logger.pipeline.info("Recording started")
         } catch {
             state = .error(.configurationError(error.localizedDescription))
-            Logger.pipeline.error("Failed to start recording: \(error.localizedDescription)")
+            Logger.pipeline.error("Failed to start recording: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -233,13 +245,25 @@ final class PipelineOrchestrator {
 
     private func handleAudioConfigChange() {
         Logger.audio.warning("Audio device configuration changed")
-        let wasRecording: Bool
-        if case .recording = state { wasRecording = true } else { wasRecording = false }
-        speechService.reset()
-        if wasRecording {
-            state = .error(.configurationError(
-                "Audio device changed during recording. Please try again."
-            ))
+
+        guard case .recording = state else {
+            // Not recording — just reset engine for next use
+            speechService.reset()
+            return
         }
+
+        // Ignore config changes within 1 second of recording start.
+        // Starting the engine can trigger a spurious config change on some systems.
+        if let startedAt = recordingStartedAt,
+           ContinuousClock.now - startedAt < .seconds(1)
+        {
+            Logger.audio.info("Ignoring config change during engine initialization")
+            return
+        }
+
+        speechService.reset()
+        state = .error(.configurationError(
+            "Audio device changed during recording. Please try again."
+        ))
     }
 }
