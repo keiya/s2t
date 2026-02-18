@@ -64,12 +64,10 @@ You can use `${ENV_VAR}` syntax to reference environment variables. Changes requ
 
 ### 3. Permissions
 
-The app will prompt you on first launch. Both are required:
+Since the app runs via `swift run` (not as a .app bundle), permissions are tied to your **terminal app** (Terminal.app, iTerm2, Warp, etc.). Grant both in **System Settings > Privacy & Security**:
 
-- **Microphone** — for audio recording
-- **Accessibility** — for global hotkey detection
-
-Grant these in **System Settings > Privacy & Security**.
+- **Microphone** — grant to your terminal app. Without this, recording captures silence.
+- **Accessibility** — grant to your terminal app. Without this, the global hotkey won't work.
 
 ## Hotkey
 
@@ -97,7 +95,7 @@ Available keys: `space`, `return`, `a`–`z`, `0`–`9`, `f1`–`f12`, etc.
 
 The window shows:
 
-- **Status bar** — current state (Ready / Recording / Transcribing / Correcting / Speaking / Done / Error) with a "Copied!" indicator
+- **Status bar** — current state (Ready / Recording / Transcribing / Correcting / Speaking / Done / Error) with a level meter during recording and a "Copied!" indicator
 - **Transcript** — the corrected text (or raw transcript if correction failed)
 - **Correction panel** — lists each issue found:
   - Original text (strikethrough) and corrected version
