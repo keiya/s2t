@@ -49,7 +49,7 @@ final class HotkeyService: Sendable {
             let tap = CGEvent.tapCreate(
                 tap: .cgSessionEventTap,
                 place: .headInsertEventTap,
-                options: .listenOnly,
+                options: .defaultTap,
                 eventsOfInterest: eventMask,
                 callback: hotkeyCallback,
                 userInfo: refcon
@@ -83,8 +83,8 @@ final class HotkeyService: Sendable {
 
     // MARK: - Event Handling
 
-    /// Called from the C callback. Determines if this event matches our hotkey.
-    func handleEvent(_ type: CGEventType, event: CGEvent) {
+    /// Called from the C callback. Returns true if the event was consumed (should be suppressed).
+    func handleEvent(_ type: CGEventType, event: CGEvent) -> Bool {
         let currentKeyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
         let currentFlags = event.flags
 
@@ -94,21 +94,21 @@ final class HotkeyService: Sendable {
                 Task { @MainActor in
                     self.onHotkeyDown()
                 }
+                return true
             }
         case .keyUp:
             if currentKeyCode == keyCode {
                 Task { @MainActor in
                     self.onHotkeyUp()
                 }
+                return true
             }
         case .flagsChanged:
-            // Handle modifier-only hotkeys (e.g., double-ctrl).
-            // For MVP, we use modifier+key combos, so flagsChanged
-            // is monitored but not acted upon separately.
             break
         default:
             break
         }
+        return false
     }
 
     // MARK: - Hotkey Parsing
@@ -233,7 +233,8 @@ private func hotkeyCallback(
     }
 
     let service = Unmanaged<HotkeyService>.fromOpaque(refcon).takeUnretainedValue()
-    service.handleEvent(type, event: event)
+    let consumed = service.handleEvent(type, event: event)
 
-    return Unmanaged.passRetained(event)
+    // Return nil to suppress the event when hotkey is matched
+    return consumed ? nil : Unmanaged.passRetained(event)
 }
