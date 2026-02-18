@@ -36,6 +36,9 @@ final class SpeechService: @unchecked Sendable {
         bufferLock.withLock { $0 = [] }
         levelLock.withLock { $0 = 0 }
 
+        // Ensure clean state — previous config changes may have left the engine uninitialized
+        engine.reset()
+
         let inputNode = engine.inputNode
         let hwFormat = inputNode.outputFormat(forBus: 0)
 

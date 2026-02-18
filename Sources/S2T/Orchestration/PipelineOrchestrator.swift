@@ -23,7 +23,7 @@ final class PipelineOrchestrator {
     private var feedbackTask: Task<Void, Never>?
     private var levelTask: Task<Void, Never>?
     private var audioConfigTask: Task<Void, Never>?
-    private var recordingStartedAt: ContinuousClock.Instant?
+    private var configChangeRestartCount = 0
 
     init(
         speechService: SpeechService,
@@ -68,7 +68,7 @@ final class PipelineOrchestrator {
         do {
             try speechService.startRecording()
             state = .recording
-            recordingStartedAt = .now
+            configChangeRestartCount = 0
             startLevelMonitor()
             Logger.pipeline.info("Recording started")
         } catch {
@@ -252,18 +252,26 @@ final class PipelineOrchestrator {
             return
         }
 
-        // Ignore config changes within 1 second of recording start.
-        // Starting the engine can trigger a spurious config change on some systems.
-        if let startedAt = recordingStartedAt,
-           ContinuousClock.now - startedAt < .seconds(1)
-        {
-            Logger.audio.info("Ignoring config change during engine initialization")
+        // The system has already stopped and uninitialized the engine.
+        // Restart recording with the new audio configuration.
+        configChangeRestartCount += 1
+        if configChangeRestartCount > 2 {
+            speechService.reset()
+            state = .error(.configurationError(
+                "Audio device changed repeatedly. Please try again."
+            ))
             return
         }
 
+        Logger.audio.info("Restarting recording after config change (attempt \(self.configChangeRestartCount))")
         speechService.reset()
-        state = .error(.configurationError(
-            "Audio device changed during recording. Please try again."
-        ))
+        do {
+            try speechService.startRecording()
+            startLevelMonitor()
+        } catch {
+            state = .error(.configurationError(
+                "Failed to restart recording: \(error.localizedDescription)"
+            ))
+        }
     }
 }
